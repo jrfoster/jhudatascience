@@ -1,0 +1,329 @@
+---
+title: "Health and Economic Impact of Severe Storms"
+output: html_document
+---
+
+## Synopsis
+
+George Luber, an epidemiologist and the associate director for global climate change in the Division of Environmental Hazards and Health Effects at the CDC’s National Center for Environmental Health, said researchers are seeking to understand the key pathways through which health will be compromised [Ross (2003)][1]. There are direct impacts, such as storms, extreme weather, heat waves and air quality problems, but there are also indirect effects climate change will have, including the abundance and distribution of vector-borne diseases [Ross (2003)][1]. This analysis uses weather event data from the National Oceanic and Atmospheric Administration (NOAA) to examine the impact these direct effects have on population health, as measured by injuries and fatalities, and on the economy, as measured by property and crop damage estimates.  The full dataset will be pruned to only those columns necessary for the analysis, and to include only observations after Jan 1, 1996.  The dataset will then be scrubbed to address errant event types and how dollar damages were reported before producing graphics which address the specific questions about most impactful event types.
+
+## Data Processing
+
+First, prepare the R environment with the libraries necessary for the analysis.
+
+```{r prepare_environment}
+library(dplyr)
+library(reshape2)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(knitr)
+```
+
+The dataset is quite large, and many of its columns will not directly be used in the analysis.  To address these two issues, we only read in the columns from the raw data that will be directly used in the analysis, and guard the expensive and time-consuming read call by saving an RDS in the working directory and testing for its existence prior to downloading and/or reading in the raw data.
+
+```{r read_dataset}
+if (!file.exists("StormData.rds")) {
+   if (!file.exists("StormData.csv.bz2")) {
+      download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",
+                    destfile = "StormData.csv.bz2")
+   }
+   
+   # Skip some columns not related to the analysis, and help scan not have to coerce
+   stormClasses <- c("NULL", "character", rep("NULL", 4), rep("character", 2), rep("NULL", 12), "character",
+                     rep("numeric", 4), "character", "numeric", "character", rep("NULL", 8), "numeric")
+   stormData <- read.csv("StormData.csv.bz2", colClasses = stormClasses, strip.white = TRUE)
+   
+   # Save an RDS so subsequent knitr executions will be faster
+   saveRDS(stormData, file = "StormData.rds")
+}
+stormData <- readRDS("StormData.rds")
+```
+
+As you can see, we have limited the dataset to 12 columns, shown below:
+
+```{r display_dim_colnames}
+dim(stormData)
+colnames(stormData)
+```
+
+The data have several issues that must first be addressed in order to perform proper analysis.
+
+First and foremost are the inconsistencies in the reporting of the data.  According to the [documentation][2], there were changes in the types of information reported during various periods in time.  Prior to January 1, 1996, only tornado, thunderstorm wind and hail events were reported.  After that date a standard set of 48 event types were used to report events.  This analysis will focus on data reported after January 1, 1996 so as to not unduly skew results due to missing event types.
+
+To accomplish this, we will first convert the character `BGN_DATE` variable to a POSIXct format so that we can use it to filter events.
+
+```{r}
+stormData$BGN_DATE <- as.POSIXct(stormData$BGN_DATE, format = "%m/%d/%Y %H:%M:%S")
+```
+
+Second, this analysis will focus only on events that are the most impactful to the economy and to population health. So, from the raw data are excluded events not causing property or crop damage and not causing injury or fatality.  In addition to these exclusions, also excluded is one outlier (REFUM == 605943) because its remarks list property damage at a multipler several orders of magnitude less than the figures reported, and its damage is reported, correctly, on another REFNUM (567251). 
+
+Combining all these filtering criteria we obtain the list of observations.
+
+```{r filter_dataset}
+tidyStorm <- stormData[stormData$BGN_DATE >= as.POSIXct("1996-01-01") & stormData$REFNUM != 605943 &
+                          (stormData$FATALITIES > 0 | stormData$INJURIES > 0 | stormData$PROPDMG > 0 |
+                              stormData$CROPDMG > 0), ]
+```
+
+Which yields `r nrow(tidyStorm)` observations upon which to base the analysis.
+
+The second issue that must be addressed are errant event types.  According to the [documentation][2] (Table 2.1.1) there are 48 valid event types.  However, the final dataset contains 222 unique event types.
+
+```{r display_eventtypes}
+uniqueEventTypes <- as.data.frame(unique(tidyStorm$EVTYPE))
+colnames(uniqueEventTypes) <- c("EventType")
+dim(uniqueEventTypes)
+```
+
+Inspecting this list one can find various types of data issues, including, but not limited to
+
+ - extra spaces
+ - misspelling, pluralization and abbreviation
+ - combination of event types
+ - non-standard event types
+
+In order to assess the impact of these issues, lets first examine the frequencies of the reported event types.
+
+```{r calculate_eventfreq}
+cnt <- nrow(tidyStorm)
+eventFrequencies <- tidyStorm %>% 
+   group_by(EVTYPE) %>% 
+   summarize(freq = n(), pct = n() / cnt * 100) %>% 
+   arrange(desc(pct))
+head(eventFrequencies, 20)
+```
+
+Based on this, we can see that that top 20 most frequently occuring event types comprise nearly 98% of the events in our dataset.  Cleaning up the events with these types and correctly categorize them, including looking at the rest of the items in the set to see if any of those can be categorized into one of these top 20, should produce a list of events that can be reasonably relied upon to do further analysis.
+
+```{r cleanup_data}
+# Cleaning up TSTM abbreviation
+tidyStorm$EVTYPE[grepl("^(?!.*(NON|MARINE)).*TSTM.*", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "THUNDERSTORM WIND"
+# Documentation says that wet and dry microbursts are thunderstorm winds
+tidyStorm$EVTYPE[grepl("MICROBURST", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "THUNDERSTORM WIND"
+# Combining flash flooding types with river and small stream floods
+tidyStorm$EVTYPE[grepl("^(?=.*(RIVER|FLASH|STREAM))(?=.*(FLOOD|FLD))", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "FLASH FLOOD"
+# Combining duplicated strong wind event
+tidyStorm$EVTYPE[grepl("^(?!.*MARINE).*STRONG WIND*", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "STRONG WIND"
+# Documentation includes forest fire, wild fire or any type of fire in Wildfire
+tidyStorm$EVTYPE[grepl("FIRE", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "WILDFIRE"
+# Combining excessive heat
+tidyStorm$EVTYPE[grepl("^(?=.*(EXCESSIVE|RECORD))(?=.*(HEAT))", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "EXCESSIVE HEAT"
+# Combining normal heat
+tidyStorm$EVTYPE[grepl("HEAT WAVE", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "HEAT"
+# Combining cold, wind chill
+tidyStorm$EVTYPE[grepl("^(?!.*(EXTREME)).*(COLD|CHILL).*",
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "COLD/WIND CHILL"
+# Combining extreme cold and wind chill
+tidyStorm$EVTYPE[grepl("^(?=.*(EXTREME))(?=.*(COLD|CHILL))", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "EXTREMECOLD/WIND CHILL"
+# Combining duplication of rip current
+tidyStorm$EVTYPE[grepl("RIP CURRENT", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "RIP CURRENT"
+# Combingin duplication of lake-effect snow
+tidyStorm$EVTYPE[grepl("^(?=.*LAKE)(?=.*EFFECT)(?=.*SNOW)", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "LAKE-EFFECT SNOW"
+# Documentation states taht landslides were converted, also combining mudslide and rockslide
+tidyStorm$EVTYPE[grepl("^(?=.*(ROCK|MUD|LAND))(?=.*(SLIDE))", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "DEBRIS FLOW"
+# Combining hurricane and typhoon
+tidyStorm$EVTYPE[grepl("HURRICANE|TYPHOON", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "HURRICANE (TYPHOON)"
+# Combining surf related events
+tidyStorm$EVTYPE[grepl("SURF", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "HIGH SURF"
+# Combining frost/freeze related events
+tidyStorm$EVTYPE[grepl("FROST|FREEZE", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "FROST/FREEZE"
+# Combing all surges
+tidyStorm$EVTYPE[grepl("SURGE", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "STORM SURGE/TIDE"
+# Combining coastal flooding and erosion
+tidyStorm$EVTYPE[grepl("^(?=.*(COASTAL))(?=.*(FLOOD|EROSION))", 
+                       tidyStorm$EVTYPE, ignore.case = TRUE, perl = TRUE)] <- "COASTAL FLOOD"
+```
+
+After cleaning up duplications, abbreviations and combining some event types, informed by the [documentation][2], inspecting remarks, and searches on the "live" [storm search][3], we now have the following top 20 most frequently occurring events.
+
+```{r recalc_eventfreq}
+eventFrequencies <- tidyStorm %>% 
+   group_by(EVTYPE) %>% 
+   summarize(freq = n(), pct = n() / cnt * 100) %>% 
+   arrange(desc(pct))
+head(eventFrequencies, 20)
+```
+
+And have cut the number of unique event types from 222 to 143.  
+
+```{r display_newfreq}
+dim(eventFrequencies)
+```
+
+To finish working on the `EVTYPE` variable, we convert it into a factor for later use.
+
+```{r factorize_evtype}
+tidyStorm$EVTYPE <- as.factor(tidyStorm$EVTYPE)
+```
+
+Third, according to the [documentation][2], the estimated damages columns are reported to two significant digits along with an alphabetic character signifying the magnitude of the value: "K" for thousands, "M" for millions and "B" for billions. In order to aggregate these costs we need to apply these magnitudes to the values and store the result.
+
+```{r aggregate_damages}
+tidyStorm <- tidyStorm %>%
+   rowwise() %>%
+   mutate(PROPDAMAGE = as.numeric(PROPDMG * switch(PROPDMGEXP, K = 10^3, M = 10^6, B = 10^9, 1)),
+          CROPDAMAGE = as.numeric(CROPDMG * switch(CROPDMGEXP, K = 10^3, M = 10^6, B = 10^9, 1)),
+          COMBDAMAGE = PROPDAMAGE + CROPDAMAGE,
+          COMBCASLTS = INJURIES + FATALITIES) %>%
+   ungroup()
+```
+
+## Results
+
+In this section we will perform some analyses on the data to determine effects of storms on population health and economics.
+
+### Population Health Impact
+
+To examine the effects of these storm events on US population health, we focus on reported injuries and fatalities that resulted from the events.  The following code will isolate the fatality and injury data from the result set, and create a panel plot showing the most impactful types of events for both injuries and fatalities, as well as total casualties, which combines injuries with fatalities.
+
+```{r plot_casualties, fig.width = 10, fig.height = 9}
+humanPlotData <- tidyStorm %>%
+   group_by(EVTYPE) %>%
+   summarize("Injuries" = sum(INJURIES), "Fatalities" = sum(FATALITIES), 
+             "TotalCasualties" = sum(COMBCASLTS))
+
+# To comply with the three-plot limit, and interpreting the statement (made by Gregory Horne in 
+# the forums) that panel plots "must all use the same scale" to mean that plots must have identical 
+# scales and not just count the same thing, I am calculating a scale to use for all these panel 
+# plots. In my opinion these plots would convey better information if they were allowed to have a 
+# dynamic scale.
+humanScale <- c(min(humanPlotData$TotalCasualties), max(humanPlotData$TotalCasualties))
+
+# Reorder factors by combined casualties, melt the data and create a stacked bar chart for 
+# combined casualties
+humanPlotData$EVTYPE <- reorder(humanPlotData$EVTYPE, humanPlotData$TotalCasualties)
+humanMelted <- melt(humanPlotData, id.vars = c("EVTYPE"))
+cmbhPlot <- humanMelted %>%
+   filter(variable %in% c("Injuries","Fatalities")) %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value, fill=variable), color=variable) +
+   geom_bar(stat = "identity") +
+   scale_y_continuous(limit=humanScale) +
+   labs(x = "Event Type", y = "Count") +
+   coord_flip() +
+   ggtitle(expression(atop("Most Impactful Storm Events, 1996-2011", 
+                           atop(italic("Total Casualties"), "")))) +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Similarly, reorder by injuries and create a bar chart corresponding to the stacked bars
+humanPlotData$EVTYPE <- reorder(humanPlotData$EVTYPE, humanPlotData$Injuries)
+humanMelted <- melt(humanPlotData, id.vars = c("EVTYPE"))
+injPlot <- humanMelted %>%
+   filter(variable %in% "Injuries") %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value)) +
+   geom_bar(stat = "identity", fill="#F8766D") +
+   scale_y_continuous(limit=humanScale) +
+   labs(x = "Event Type", y = "Count") +
+   coord_flip() +
+   ggtitle("Injuries") +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Repeat for fatalities
+humanPlotData$EVTYPE <- reorder(humanPlotData$EVTYPE, humanPlotData$Fatalities)
+humanMelted <- melt(humanPlotData, id.vars = c("EVTYPE"))
+fatPlot <- humanMelted %>%
+   filter(variable %in% "Fatalities") %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value)) +
+   geom_bar(stat = "identity", fill="#00BFC4") +
+   scale_y_continuous(limit=humanScale) +
+   labs(x = "Event Type", y = "Count") +
+   coord_flip()  +
+   ggtitle("Fatalities") +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Display the panel plot
+grid.arrange(cmbhPlot, injPlot, fatPlot, layout_matrix = rbind(c(1,1),c(2,3)))
+```
+
+Based on the graphs we can see that Tornados, Excessive Heat and different types of flooding are the most impactful to human population health.
+
+### Economic Impact
+
+To examine the economic impact we will focus on the estimated property and crop damage resulting from storm events.  The following code will isolate the property and crop damage data from the result set, and create a panel plot showing the most impactful types of events for both property damage and crop damage, as well as total damage, which combines property and crop damage.
+
+```{r plot_damages, fig.width = 10, fig.height = 9}
+econPlotData <- tidyStorm %>%
+   group_by(EVTYPE) %>%
+   summarize("CropDamage" = sum(CROPDAMAGE), "PropertyDamage" = sum(PROPDAMAGE), 
+             "TotalDamage" = sum(COMBDAMAGE))
+
+# Again, setting identical scales to comply with the three-plot limit
+damageScale <- c(min(econPlotData$TotalDamage), max(econPlotData$TotalDamage))
+
+# Reorder factors by combined damages, melt the data and create a stacked bar chart for 
+# combined damages
+econPlotData$EVTYPE <- reorder(econPlotData$EVTYPE, econPlotData$TotalDamage)
+econMelted <- melt(econPlotData, id.vars = c("EVTYPE"))
+cmbePlot <- econMelted %>%
+   filter(variable %in% c("CropDamage","PropertyDamage")) %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value, fill=variable), color=variable) +
+   geom_bar(stat = "identity") +
+   scale_y_continuous(limit=damageScale) +
+   labs(x = "Event Type", y = "Cost (US Dollars)") +
+   coord_flip() +
+   ggtitle(expression(atop("Most Impactful Storm Events, 1996-2011", 
+                           atop(italic("Total Damages"), "")))) +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Similarly, reorder by crop damage and create a bar chart corresponding to the stacked bars
+econPlotData$EVTYPE <- reorder(econPlotData$EVTYPE, econPlotData$CropDamage)
+econMelted <- melt(econPlotData, id.vars = c("EVTYPE"))
+cropPlot <- econMelted %>%
+   filter(variable %in% "CropDamage") %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value, fill=variable), color=variable) +
+   geom_bar(stat = "identity", fill="#F8766D") +
+   scale_y_continuous(limit=damageScale) +
+   labs(x = "Event Type", y = "Cost (US Dollars)") +
+   coord_flip() +
+   ggtitle("Crop Damage") +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Repeat for property damage
+econPlotData$EVTYPE <- reorder(econPlotData$EVTYPE, econPlotData$PropertyDamage)
+econMelted <- melt(econPlotData, id.vars = c("EVTYPE"))
+propPlot <- econMelted %>%
+   filter(variable %in% "PropertyDamage") %>%
+   top_n(20, value) %>%
+   ggplot(aes(x=EVTYPE, y=value, fill=variable), color=variable) +
+   geom_bar(stat = "identity", fill="#00BFC4") +
+   scale_y_continuous(limit=damageScale) +
+   labs(x = "Event Type", y = "Cost (US Dollars)") +
+   coord_flip() +
+   ggtitle("Property Damage") +
+   theme_bw(base_family = "Avenir", base_size = 12)
+
+# Display the panel plot
+grid.arrange(cmbePlot, cropPlot, propPlot, layout_matrix = rbind(c(1,1),c(2,3)))
+```
+
+From this, we can see that Hurricane/Typhoon, Storm Surge (related to hurricanes/typhoons) an Flooding have the greatest impact on the economy, based on damage estimates.  One notable mention is Drought, which is the most impactful to crops, based on damage estimates.
+
+# Conclusions
+
+While it might be fairly simple from this data and analysis to see what the most impactful types of events are interms of direct impact humans, property and crops, the analysis is limited to only the storm data and doesn't take into account some other interesting datasets like population density in the locations that the events take place, or geographic location of specific types of crops.  It also doesn't take into account the downstream effects of these types of events, such as increased consumer costs due to property damages, or vector-born illness discussed in [Ross (2003)][1].  It also doesn't examine probabilities of events taking place in certain regions during certain times of year. In order to make recommendations (which I know we are not required to do) it would be helpful to look at other datasets to make more informed decisions.
+
+
+[1]: http://www.emergencymgmt.com/health/How-Warming-Climate-Impact-Public-Health.html
+[2]: https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf
+[3]: http://www.ncdc.noaa.gov/stormevents/
