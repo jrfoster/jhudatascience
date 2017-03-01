@@ -1,0 +1,108 @@
+---
+title: "Impact of Transmission Type on Fuel Economy"
+author: "jrfoster"
+bibliography: "bibliography.bib"
+biblio-style: "BibTeX"
+geometry: margin=.8in
+output: 
+  pdf_document:
+    includes:
+        in_header: mystyle.sty 
+---
+
+```{r echo=FALSE, error=FALSE, warning=FALSE}
+suppressMessages(library(dplyr))
+suppressMessages(library(GGally))
+suppressMessages(library(MASS))
+suppressMessages(library(car))
+suppressMessages(library(knitr))
+```
+
+## Executive Summary
+
+This analysis seeks to contrast the impact of automatic and manual transmissions on fuel economy and to quantify that impact. The analysis utilizes data from the 1974 Motor Trend US magazine on 32 automobiles. The analysis concludes that if only transmission type is considered then a manual transmission provides a 7.245 mpg increase. However, that model also suggests that transmission type alone cannot account for this entire increase with the model having adjusted $R^2=.3385$.
+
+Using ANOVA, several models are compared, informed by [@Hocking1], [@Henderson1] and [@EPA1]. The analysis concludes that a more appropriate model includes the vehicle's weight and quarter mile time. Using this model and holding all other variables constant, transmission type provides an increase of 2.94 mpg. This model has adjusted $R^2=.834$.
+
+## Exploratory Data Analysis
+
+The data were extracted from the 1974 Motor Trend US magazine, and comprise fuel consumption and 10 aspects of automobile design and performance for 32 automobiles (1973-74 models) and therefore consist of 32 observations of 11 variables.  The following table lists the variables and their classes.
+
+```{r echo=FALSE}
+data(mtcars)
+bareData <- mtcars
+kable(as.data.frame(lapply(mtcars,class)))
+```
+
+Note that the data contain several numeric variables that are, by nature, discrete and will therefore be converted to factors: these include cyl, vs, am, gear and carb.
+
+```{r echo=FALSE}
+mtcars <- mtcars %>%
+  mutate(cyl = factor(cyl), vs = factor(vs), gear = factor(gear), carb = factor(carb), am = factor(am))
+```
+
+In the Appendix, Figure 1 shows a pair-wise plot for the raw data which also contains a correlation matrix. From the plots we can observe fairly strong, but curved, relationships to mpg with displacement, horsepower and weight, but there may be other factors at play as well, such as quarter mile time and the rear axle gear ratio. From the correlation matrix, we can see that there are a number of highly correlated variables: cylinder and displacement are highly correlated, which makes sense because displacement is a measure for all cylinders, weight is highly correlated with cylinders, which makes sense because more cylinders mean larger engines.
+
+## Simple Inference on Direct Relationship
+
+We first perform a Welch two-sample t-test with $\alpha=.05$\ with the null hypothesis, $H_0$, that the mean mpg of cars with automatic transmissions is equal to the mean mpg of cars with manual transmissions.  We also generate a simple linear model for `mpg ~ am`. The following table contains the results of the t-test and selected attributes from the linear model.
+
+```{r echo=FALSE}
+t1 <- t.test(mpg ~ am, data=mtcars, var.equal=FALSE)
+basicFit <- lm(mpg ~ am, data=mtcars)
+df <- data.frame(paste("[", round(t1$conf.int[1],4), ", ", round(t1$conf.int[2],4), "]", sep=""), round(unname(t1$parameter), 2), qt(.975, unname(t1$parameter)), unname(t1$statistic), t1$p.value, unname(t1$estimate[1]), unname(t1$estimate[2]), unname(summary(basicFit)$r.squared))
+kable(df, col.names = c("Conf Int", "Deg F", "Tabulated t-value", "t-Statistic", "p-value", "Mean (auto)", "Mean (man)", "R Sq"), digits = 4)
+```
+
+From the test we can see that $p < .05$, the t-statistic is greater than the tabulated t-value and the confidence interval does not contain zero, so there appears to be sufficient evidence at $\alpha=.05$ to reject the claim that the mean mpg of cars with automatic transmissions is equal to the mean mpg of cars with manual transmissions.  From the linear model, we can see that cars with manual transmissions have an increase of `r round(unname(basicFit$coefficients[2]),3)` miles per gallon. However, we can also see that $R^2 = .36$, which means that this model doesn't entirely explain the increase in mpg.
+
+## The Search For A Better Model
+
+Examining the correlation matrix yields a number of variables that are all highly correlated, although some are highly correlated with one another (such as disp and cyl). [@EPA1] noted that vehicle weight and displacement were the most significant factors affecting fuel economy. We also note from [@Henderson1] that wt is likely the best single predictor of mpg, so we start by adding wt. [@Hocking1] settled on a model that also included qsec (which itself is highly negatively correlated with hp and cyl). So we start with transmission type alone, then add in weight and subsequently other predictors based on correlation and prior research and then compare the resulting models using ANOVA.
+
+```{r echo=FALSE}
+fit1 <- lm(mpg ~ am, data=mtcars)
+fit2 <- lm(mpg ~ am + wt, data = mtcars)
+fit3 <- lm(mpg ~ am + wt + qsec, data=mtcars)
+anova(fit1, fit2, fit3)
+```
+
+From this we can see our p-values are extremely low in the final model `mpg ~ am + wt + qsec`, which corresponds with [@Hocking1].  We also check each model for multiple predictors that are collectively correlated by examining the Variance Inflation Factor. Below are the results of this analysis.
+
+```{r echo=FALSE}
+vif(fit2)
+vif(fit3)
+```
+
+Based on this analysis, we agree with Hocking's model of `mpg ~ am + wt + qsec` and choose this as our final model. The following tables contain the coefficients for this model.
+
+```{r echo=FALSE}
+finalFit <- lm(mpg ~ am + wt + qsec, data=mtcars)
+kable(data.frame(coef(finalFit)), col.names = c("Estimate"))
+```
+
+The following table shows the confidence intervals for this model. Note that none of the intervals for the variables contain zero.
+
+```{r echo=FALSE}
+kable(confint(finalFit))
+```
+
+Figure 2 in the Appendix shows all the diagnostic plots for the final model.
+
+\newpage
+### Appendix - Tables and Figures
+
+```{r echo=FALSE, error=FALSE, warning=FALSE, fig.align='center', fig.width=12, fig.height=10}
+ggpairs(bareData, lower = list(continuous = wrap("smooth", method = "loess")))
+```
+\begin{center}
+Figure 1: MTCars Pair-Wise Plots and Correlation Matrix
+\end{center}
+```{r echo=FALSE, fig.align='center', fig.width=8, fig.height=6}
+par(mfrow = c(2, 2))
+plot(finalFit)
+```
+\begin{center}
+Figure 2: Diagnostic Plots for Final Regression Model
+\end{center}
+### References
