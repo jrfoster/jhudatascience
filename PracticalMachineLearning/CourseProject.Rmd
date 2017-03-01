@@ -1,0 +1,369 @@
+---
+title: "Machine Learning Course Project"
+author: "jrfoster"
+bibliography: "bibliography.bib"
+biblio-style: "BibTeX"
+date: "January 25, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r functionDefs, echo=FALSE}
+assertPackage <- function(pkg) {
+  if (!suppressMessages(require(pkg, character.only = TRUE, quietly = TRUE))) {
+    install.packages(pkg, dep=TRUE)
+    if (!suppressMessages(require(pkg, character.only = TRUE))) {
+      stop("Package not found")
+    }
+  }
+}
+
+loadData <- function(datadir) {
+  wd <- getwd()
+  
+  if (!file.exists(file.path(wd, datadir))) {
+    dir.create(file.path(wd, datadir))
+  }
+  setwd(file.path(wd, datadir))
+  
+  if (!file.exists("pml-training.rds")) {
+    if (!file.exists("pml-training.csv")) {
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                    destfile = "pml-training.csv")
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                    destfile = "pml-testing.csv")
+    }
+    
+    allPmltraining <- read.csv("pml-training.csv", strip.white = TRUE, na.strings = c("#DIV/0!","NA",""))
+    
+    # Save an RDS so subsequent knitr executions will be faster
+    saveRDS(allPmltraining, file = "pml-training.rds")
+  }
+  allPmltraining <- readRDS("pml-training.rds")
+  setwd(wd)
+  return(allPmltraining)
+}
+
+createRFModel <- function() {
+  if (!file.exists("rfModel.RData")) {
+    rfModel <- train(classe ~ ., data=training, method="rf", ntree=250, 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(rfModel, file="rfModel.RData")    
+  } else {
+    load("rfModel.RData")
+  }
+  return(rfModel)  
+}
+
+createKNNModel <- function() {
+  if (!file.exists("knnModel.RData")) {
+    knnModel <- train(classe ~ ., data=training, method="knn", 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(knnModel, file="knnModel.RData")    
+  } else {
+    load("knnModel.RData")
+  }
+  return(knnModel)
+}
+
+createGBMModel <- function() {
+  if (!file.exists("gbmModel.RData")) {
+    gbmModel <- train(classe ~ ., data = training, method="gbm", verbose=FALSE, 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(gbmModel, file="gbmModel.RData")    
+  } else {
+    load("gbmModel.RData")
+  }
+  return(gbmModel)
+}
+```
+
+## Executive Summary
+
+There has been much ado in healthcare about the notion of "Precision Medicine", which, loosely defined, is using genetic or molecular profiling to optimize efficiency or therapeutic benefit for particular groups of patients [@Oxford3].  There has been much activity in the Machine Learning community related to the identification of human activity (HAR) (eg [@EECS4]) but the work done by [@Velloso1] opens the door to a much richer, more qualitative study of human movement.  While the work done by Velloso, et al, demonstrate some of the challenges in using classification models in qualitative study of human movement, and further state that a model based approach (more akin to what a trainer or physical therapist would do in real life) is more effective, the idea of "precision coaching" presents itself as an interesting course of study for highly mechanical, repetitive and precision-dominant movements such as swimming, golf, track and field and numerous others.
+
+This analysis uses data from [@Velloso1] to investigate the efficacy of three classification algorithms: Gradient Boosting Machine, K-Nearest Neighbors and Random Forest. Some initial data processing is performed to reduce complexity, models are generated and examined from various aspects, including variable importance and overall performance.  Finally a model is chosen and applied to a test set given for the assignment.
+
+## Initial Data Processing
+
+To prepare the environment, I use a custom function to load the required libraries. This function will install the packages, and dependencies, if necessary.
+
+```{r packages, error=FALSE, warning=FALSE}
+set.seed(13031)
+assertPackage("knitr")
+assertPackage("gridExtra")
+assertPackage("caret")
+assertPackage("dplyr")
+assertPackage("corrplot")
+assertPackage("Biocomb")
+```
+
+First, load the data using a custom function. Note that in a cursory examining the csv file I noticed there were some variables that contained the the strings "NA" and "#DIV/0!", both of which are not appropriate for continuous variable, so the function converts those strings to the symbol NA during the load.
+
+```{r getData}
+allData <- loadData("WLEData")
+```
+
+The raw data consist of `r dim(allData)[1]` observations of `r dim(allData)[2]` variables. The original work [@Velloso1] notes that there were 96 derived features added to the raw sensor readings. Each of these 96 variables is a statistic calculated from raw sensor data and is based on a specific time span.  I am choosing to exclude these derived variables in the development of the prediction model because, by their nature, they are already represented in the raw sensor readings and because they only appear on approximately 2% of the observations.  I am also choosing to exclude several variables that have no predictive value and only have to do with identification of an observation, e.g. the redundant row number, the test subject, the time stamps and the associated "window" variables. After excluding those variables, we split the data into a training and validation subsets, using a 70/30 split, for analysis. 
+
+```{r dataCleanPartition}
+idCols <- c("X","user_name","raw_timestamp_part_1","raw_timestamp_part_2",
+            "cvtd_timestamp","new_window","num_window")
+allCleaned <- allData %>%
+  select(-one_of(idCols)) %>%
+  select(-starts_with("avg_") , -starts_with("var_") , -starts_with("stddev_")
+         , -starts_with("max_") , -starts_with("min_") , -starts_with("amplitude_")
+         , -starts_with("kurtosis_") , -starts_with("skewness_"))
+inTrain <- createDataPartition(allCleaned$classe, p=.7, list=FALSE)
+training <- allCleaned[inTrain,]
+validation <- allCleaned[-inTrain,]
+```
+
+This leaves us with a testing data with `r dim(training)[1]` observations and a validation set with `r dim(validation)[1]` observations, each with `r dim(training)[2]` variables. Note that with these 53 variables, none of are considered "near zero".
+
+```{r nzv}
+nearZeroVar(training)
+```
+
+[@Velloso1] also cited [@Hall2] and a correlation-based method for reducing the number of possible predictors, so lets examine the correlation between the remaining 52 predictor variables, to see what may be highly correlated.
+
+```{r corPlot, fig.align='center', fig.height=10, fig.width=10}
+corrMtx <- cor(training[,1:52])
+corrplot(corrMtx, order="FPC", method="color", type="lower", tl.col="grey32")
+```
+
+From the plot we can see several variables that are show a high degree of correlation. The method the original work used to reduce number of variables exists in an R library used in genomics, (Biocomb). This analysis will be utilizing PCA to reduce the number of features (as part of the model generation), but for information purposes, I've included the output of the analysis produced by the original author's method of feature selection.
+
+```{r biocomb}
+select.cfs(training)
+```
+
+## Model Generation
+
+Three models are fitted to the training data: Gradient Boosting Machine (GBM), K-Nearest Neighbor (KNN) and Random Forest as indicated by the original work, [@Velloso1]  For each of the models we pass a call to trainControl using the default 10-fold cross validation and a parameter to include Principal Component Analysis (PCA) in pre-processing.  See the appendix for the code used to generate (and persist) the models.
+
+```{r modelGen}
+gbmModel <- createGBMModel()
+knnModel <- createKNNModel()
+rfModel <- createRFModel()
+gbmVarImp <- suppressMessages(varImp(gbmModel))
+knnVarImp <- suppressMessages(varImp(knnModel))
+rfVarImp <- suppressMessages(varImp(rfModel))
+```
+
+Now that we've generated the models, lets examine each to see which variables are the most important in terms of predictive power, so that we can compare with the fast, correlation-based filter by [@Hall2].
+
+```{r varImp,  fig.align='center', fig.height=12, fig.width=10}
+p1 <- plot(knnVarImp, main = "K-Nearest Neighbor", top=8)
+p2 <- plot(gbmVarImp, main = "Gradient Boosting", top=20)
+p3 <- plot(rfVarImp,  main = "Random Forest", top=20)
+grid.arrange(p1, p2, p3, layout_matrix = rbind(c(1,1),c(2,3)))
+```
+
+I personally find it interesting that there is such a variety in the variables that each approach considers important, but that there is some overlap, especially between the random forest approach and that suggested in the original work, as noted above.
+
+## Model Performance
+
+Lets take a look at the models and their relative performance at predicting the class in our validation set by generating predictions using the model against our validation set and then examining some key values from their associated confusion matrices.
+
+```{r predictionsAndConfusion, error=FALSE, warning=FALSE}
+# Perform the predictions on the validation set
+gbmModelPred <- suppressMessages(predict(gbmModel, validation))
+knnModelPred <- suppressMessages(predict(knnModel, validation))
+rfModelPred  <- suppressMessages(predict(rfModel,  validation))
+# Build the confusion matrices for each of the models
+gbmConfusion <- confusionMatrix(validation$classe, gbmModelPred)
+knnConfusion <- confusionMatrix(validation$classe, knnModelPred)
+rfConfusion  <- confusionMatrix(validation$classe, rfModelPred)
+# Build out all the data for display: validation accuracy, out of sample error, kappa, and
+# the basic accuracy on the training set
+models <- c("Gradient Boosting Machine", "K-Nearest Neighbor", "Random Forest")
+validAccuracy <- c(gbmConfusion$overall[1], knnConfusion$overall[1], rfConfusion$overall[1])
+oosEror <- 1- validAccuracy
+kappa <- c(gbmConfusion$overall[2], knnConfusion$overall[2], rfConfusion$overall[2])
+trainAccuracy <- c(max(gbmModel$results$Accuracy), max(knnModel$results$Accuracy), 
+                   max(rfModel$results$Accuracy))
+table <- data.frame(models, validAccuracy, oosEror, kappa, trainAccuracy)
+kable(table, digits=5, col.names=c("Model","Validation Accuracy", "Out-Of-Sample Error", "Kappa", "Training Accuracy"))
+
+```
+
+Based on the information above, like [@Velloso1], we can see that the Random Forest model is the most accurate. We show below the decision tree of the final model.   The estimated out-of-sample error for the Random Forest Model is `r 1 - rfConfusion$overall[1]`, which is based on 10-fold cross validation (see model generation functions in the Appendix)
+
+
+Finally, we apply this to the test data provided in the assignment to generate final predictions. A couple of notes for the reviewer, the custom function we used to load the training data will have downloaded the test set along with the training set and has made it available in a file named pml-testing.csv in the data directory. We use the same data directory, read the file and predict the outcomes using our Random Forest model.
+
+```{r testModel}
+testing <- read.csv(file.path("WLEData", "pml-testing.csv"), strip.white = TRUE, na.strings = c("#DIV/0!","NA",""))
+rfFinalPredict  <- suppressMessages(predict(rfModel,  testing))
+rfFinalPredict
+```
+
+
+## Appendix
+
+The following is the source for the custom functions referenced in the narrative
+
+```{r eval=FALSE}
+assertPackage <- function(pkg) {
+  ##################################################################################
+  # Loads and attaches the given package, installing it if not already present.  
+  # Note that the implementation uses require.  ?require for more information.
+  #
+  # Args:
+  #   pkg: The package to check given as a name or a character string
+  #
+  # Side Effects:
+  # This method installs dependent packages of the given package.
+  # If not able to install what is required, halts termination.
+  ##################################################################################
+  if (!suppressMessages(require(pkg, character.only = TRUE, quietly = TRUE))) {
+    install.packages(pkg, dep=TRUE)
+    if (!suppressMessages(require(pkg, character.only = TRUE))) {
+      stop("Package not found")
+    }
+  }
+}
+
+loadData <- function(datadir) {
+  ##################################################################################
+  # Checks for thet existence of the complete "training" dataset for the activity 
+  # classification data as an rds. If it does not exist, then check to see if the 
+  # file has been previously downloaded from the site noted in the course project, 
+  # and if not download it. Once the base training dataset has been downloaded 
+  # read the csv into a dataframe and save it as an rds.
+  #
+  # Once the rds exists, simply load its contents into a dataframe
+  #
+  # Args:
+  #   datadir: The directory, relative to getwd() to check for the data
+  #
+  # Returns:
+  # A dataframe of all the pml-training data read from the persisted rds
+  #
+  # Side Effects:
+  # This method creates a new file named pml-training.rds in the specified 
+  # directory, after, possibly, creating the specified directory
+  ##################################################################################
+  wd <- getwd()
+  
+  if (!file.exists(file.path(wd, datadir))) {
+    dir.create(file.path(wd, datadir))
+  }
+  setwd(file.path(wd, datadir))
+  
+  if (!file.exists("pml-training.rds")) {
+    if (!file.exists("pml-training.csv")) {
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                    destfile = "pml-training.csv")
+      download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                    destfile = "pml-testing.csv")
+    }
+    
+    allPmltraining <- read.csv("pml-training.csv", strip.white = TRUE, na.strings = c("#DIV/0!","NA",""))
+    
+    # Save an RDS so subsequent knitr executions will be faster
+    saveRDS(allPmltraining, file = "pml-training.rds")
+  }
+  allPmltraining <- readRDS("pml-training.rds")
+  setwd(wd)
+  return(allPmltraining)
+}
+
+createRFModel <- function() {
+  ##################################################################################
+  # Checks for the existence fo the Random Forest model file in the current
+  # working directory and if there, returns its contents.  If not, it prepares the
+  # model using 10-fold Cross Validation and pre-processes using Principal Component
+  # Analysis.
+  #
+  # This methoda assumes access to a dataset named 'training' that contains a 'classe'
+  # variable.
+  #
+  # Returns:
+  # A list representing the result of training the model to the training data.
+  #
+  # Side Effects:
+  # Creates a file named rfModel.RData in the working directory
+  ##################################################################################
+  if (!file.exists("rfModel.RData")) {
+    rfModel <- train(classe ~ ., data=training, method="rf", ntree=250, 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(rfModel, file="rfModel.RData")    
+  } else {
+    load("rfModel.RData")
+  }
+  return(rfModel)  
+}
+
+createKNNModel <- function() {
+  ##################################################################################
+  # Checks for the existence fo the K-Nearest Neighbor model file in the current
+  # working directory and if there, returns its contents.  If not, it prepares the
+  # model using 10-fold Cross Validation and pre-processes using Principal Component
+  # Analysis.
+  #
+  # This methoda assumes access to a dataset named 'training' that contains a 'classe'
+  # variable.
+  #
+  # Returns:
+  # A list representing the result of training the model to the training data.
+  #
+  # Side Effects:
+  # Creates a file named knnModel.RData in the working directory
+  ##################################################################################
+  if (!file.exists("knnModel.RData")) {
+    knnModel <- train(classe ~ ., data=training, method="knn", 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(knnModel, file="knnModel.RData")    
+  } else {
+    load("knnModel.RData")
+  }
+  return(knnModel)
+}
+
+createGBMModel <- function() {
+  ##################################################################################
+  # Checks for the existence fo the Gradient Boosting Machine model file in the current
+  # working directory and if there, returns its contents.  If not, it prepares the
+  # model using 10-fold Cross Validation and pre-processes using Principal Component
+  # Analysis.
+  #
+  # This methoda assumes access to a dataset named 'training' that contains a 'classe'
+  # variable.
+  #
+  # Returns:
+  # A list representing the result of training the model to the training data.
+  #
+  # Side Effects:
+  # Creates a file named knnModel.RData in the working directory
+  ##################################################################################
+  if (!file.exists("gbmModel.RData")) {
+    gbmModel <- train(classe ~ ., data = training, method="gbm", verbose=FALSE, 
+          trControl=trainControl(method="cv", number=10, preProcOptions="pca"))
+    save(gbmModel, file="gbmModel.RData")    
+  } else {
+    load("gbmModel.RData")
+  }
+  return(gbmModel)
+}
+```
+
+The following shows the full output of each of the confusion matrices of the three models generated and described in the narrative.
+
+```{r gbmConfusion}
+gbmConfusion
+```
+
+```{r knnConfusion}
+knnConfusion
+```
+
+```{r rfConfusion}
+rfConfusion
+```
+
+#References

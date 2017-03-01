@@ -1,0 +1,107 @@
+---
+title: "2007 EPA Toxic Air Emissions"
+author: "jrfoster"
+date: "February 7, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r dataProcessing}
+suppressMessages(library(leaflet))
+suppressMessages(library(dplyr))
+
+# Download the data if we don't already have it
+if (!file.exists("2007_EPA_Toxics_Release_Inventory.csv")) {
+  download.file(url="https://opendata.socrata.com/api/views/nu94-6cmw/rows.csv?accessType=DOWNLOAD",
+              destFile="2007_EPA_Toxics_Release_Inventory.csv")
+}
+
+# Read the saved dataframe, otherwise, load the csv and save it as a dataframe
+if (!file.exists("toxics.rds")) {
+  toxics <- read.csv("2007_EPA_Toxics_Release_Inventory.csv", stringsAsFactors=FALSE)
+  saveRDS(toxics, file = "toxics.rds")
+} else {
+  toxics <- readRDS("toxics.rds")
+}
+
+# Use dplyr to select the columns we will need from our map and the rows we will be focusing
+# on, which are the gas-based emissions into the atmosphere
+toxics.clean <- toxics %>%
+  select(Facility.Name, Latitude, Longitude, Total.Air.Emissions..Pounds.) %>%
+  filter(!is.na(Longitude), Longitude != 0, !is.na(Latitude), Latitude != 0, Total.Air.Emissions..Pounds. > 0) %>%
+  group_by(Facility.Name, Latitude, Longitude) %>%
+  summarize(Total.Air.Emissions = sum(Total.Air.Emissions..Pounds.))
+
+
+# Use the summarized data to calculate some quantile groups in which to place each which will determine
+# the size of the circles in our map
+toxics.clean$NTile <- ntile(toxics.clean$Total.Air.Emissions, 5) * 10
+
+```
+
+```{r createMap}
+# Crate the map
+toxicMap <- toxics.clean %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lat=~Latitude, lng=~Longitude, radius = ~NTile,
+                   popup=~paste(Facility.Name, paste(Total.Air.Emissions," lbs"), sep="<br>"), 
+                   clusterOptions = markerClusterOptions())
+```
+
+```{r displayMap, fig.align='center', fig.width=10, fig.height=7}
+# Display the map
+toxicMap
+```
+
+## Appendix
+
+The following is the code to download and process the data and to create the Leaflet interactive map.  Note that the Toxics Release Inventory (TRI) is a publicly available EPA database that contains information on toxic chemical releases and waste management activities reported annually by certain industries as well as federal facilities.  For more information on the data, visit 
+
+https://opendata.socrata.com/Government/2007-EPA-Toxics-Release-Inventory/nu94-6cmw
+
+```{r eval=FALSE, echo=TRUE}
+suppressMessages(library(leaflet))
+suppressMessages(library(dplyr))
+
+# Download the data if we don't already have it
+if (!file.exists("2007_EPA_Toxics_Release_Inventory.csv")) {
+  download.file(url="https://opendata.socrata.com/api/views/nu94-6cmw/rows.csv?accessType=DOWNLOAD",
+              destFile="2007_EPA_Toxics_Release_Inventory.csv")
+}
+
+# Read the saved dataframe, otherwise, load the csv and save it as a dataframe
+if (!file.exists("toxics.rds")) {
+  toxics <- read.csv("2007_EPA_Toxics_Release_Inventory.csv", stringsAsFactors=FALSE)
+  saveRDS(toxics, file = "toxics.rds")
+} else {
+  toxics <- readRDS("toxics.rds")
+}
+
+# Use dplyr to select the columns we will need from our map and the rows we will be focusing
+# on, which are the gas-based emissions into the atmosphere
+toxics.clean <- toxics %>%
+  select(Facility.Name, Latitude, Longitude, Total.Air.Emissions..Pounds.) %>%
+  filter(!is.na(Longitude), Longitude != 0, !is.na(Latitude), Latitude != 0, Total.Air.Emissions..Pounds. > 0) %>%
+  group_by(Facility.Name, Latitude, Longitude) %>%
+  summarize(Total.Air.Emissions = sum(Total.Air.Emissions..Pounds.))
+
+
+# Use the summarized data to calculate some quantile groups in which to place each which will determine
+# the size of the circles in our map
+toxics.clean$NTile <- ntile(toxics.clean$Total.Air.Emissions, 5) * 10
+
+# Crate the map
+toxicMap <- toxics.clean %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(lat=~Latitude, lng=~Longitude, radius = ~NTile,
+                   popup=~paste(Facility.Name, paste(Total.Air.Emissions," lbs"), sep="<br>"), 
+                   clusterOptions = markerClusterOptions())
+
+# Display the map
+toxicMap
+```

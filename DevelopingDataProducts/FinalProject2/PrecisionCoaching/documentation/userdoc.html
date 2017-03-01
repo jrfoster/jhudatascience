@@ -1,0 +1,39 @@
+<html>
+<head>
+<title>Precision Coaching Concept Application</title>
+<link rel="stylesheet" href="bootstrap.css">
+</head>
+<body>
+
+<h1 id="introduction">Introduction</h1>
+
+<p>This application simulates the concept of a precision coaching application.  It does this by allowing the user to visualize different aspects of the Qualitative Activity Recognition dataset generated from the study published <a href="http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf" target="_blank">here</a>.  It allows the user to select a test subject (athlete/patient) and then select which aspects of the data to view in a 3-D scatterplot.</p>
+
+<p>The data in the dataset are complex, and so this application deals with only the subset of columns that relate to the three-dimensional measurements provided by the gyroscope, magnetometer and the accelerometer, that, in the study, were placed on several different body positions.</p>
+
+<h1 id="details">Details</h1>
+
+<p><strong>Plot Feature Selection</strong> <br>
+In the panel on the left, you can choose which aspects of the dataset to render in the scatterplot:</p>
+
+<ul>
+<li>Which test subject (athlete/patient) was performing the dumbbell curls</li>
+<li>Which sensor data you want to view</li>
+<li>Which body position the sensor data came from</li>
+<li>Which classification of dumbbell curl the subject was performing</li>
+</ul>
+
+<p><strong>Plot Rendering</strong> <br>
+As you make selections in the left panel, the scatterplot is rendered on the right.</p>
+
+<p>Please be aware that performance of this on Firefox and IE is less than stellar, so its recommended to use Chrome or Safari.</p>
+
+<p>Also, be aware that if you clear all the activity classification checkboxes, the application will automatically select ‘Correct’ for you and will render the plot with that classification.</p>
+
+<p><strong>Notes of Interest</strong> <br>
+I think the most interesting views are the ones from the magnetometer on the arm or the forearm, but try some different combinations!</p>
+
+<p>Enjoy!</p>
+
+</body>
+</html>

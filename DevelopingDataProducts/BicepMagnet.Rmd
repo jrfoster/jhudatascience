@@ -1,0 +1,87 @@
+---
+title: "Week 3 Project"
+author: "jrfoster"
+date: "February 9, 2017"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r setupData}
+suppressMessages(library(plotly))
+suppressMessages(library(dplyr))
+
+# Download the data if we don't already have it
+if (!file.exists("pml-training.csv")) {
+  download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                destfile = "pml-training.csv")
+}
+
+# Read the saved dataframe, otherwise, load the csv and save it as a dataframe
+if (!file.exists("pmlTraining.rds")) {
+  pmlRaw <- read.csv("pml-training.csv", na.strings=c("NA","","#DIV/0!"))
+  saveRDS(pmlRaw, file = "pmlTraining.rds")
+} else {
+  pmlRaw <- readRDS("pmlTraining.rds")
+}
+
+# Use dplyr to select the columns we will need from our plot which are only those
+# related to the arm magnet and the classifier
+pmlPlotting <- pmlRaw %>%
+  select(magnet_arm_x, magnet_arm_y, magnet_arm_z, user_name, classe) %>%
+  filter(classe == "A")
+```
+
+## Introduction
+
+For week 3, we are asked to put together a presentation containing an interactive plot created with Plotly
+
+This presentation contains one interesting visualization of some of the data used in Practical Machine Learning, specifically a 3-D scatterplot of one of the sensors used to map a bicep curl.
+
+**One note to the reviewer - please view this on IE, Chrome or Safari as the plot will not render at all on Firefox.**
+
+
+Enjoy!
+
+## Visualization of the Arm Magnet Sensor
+
+```{r plotData}
+# Create the plot and display it
+p <- plot_ly(pmlPlotting, x=~magnet_arm_x, y=~magnet_arm_y, z=~magnet_arm_z, color=~user_name) %>%
+  add_markers()
+p
+```
+
+## Code
+
+```{r code, echo=TRUE, eval=FALSE}
+suppressMessages(library(plotly))
+suppressMessages(library(dplyr))
+
+# Download the data if we don't already have it
+if (!file.exists("pml-training.csv")) {
+  download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                destfile = "pml-training.csv")
+}
+
+# Read the saved dataframe, otherwise, load the csv and save it as a dataframe
+if (!file.exists("pmlTraining.rds")) {
+  pmlRaw <- read.csv("pml-training.csv", na.strings=c("NA","","#DIV/0!"))
+  saveRDS(pmlRaw, file = "pmlTraining.rds")
+} else {
+  pmlRaw <- readRDS("pmlTraining.rds")
+}
+
+# Use dplyr to select the columns we will need from our plot which are only those
+# related to the arm magnet and the classifier
+pmlPlotting <- pmlRaw %>%
+  select(magnet_arm_x, magnet_arm_y, magnet_arm_z, user_name, classe) %>%
+  filter(classe == "A")
+
+# Create the plot and display it
+p <- plot_ly(pmlPlotting, x=~magnet_arm_x, y=~magnet_arm_y, z=~magnet_arm_z, color=~user_name) %>%
+  add_markers()
+p
+```
