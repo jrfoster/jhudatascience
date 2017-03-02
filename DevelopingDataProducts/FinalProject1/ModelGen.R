@@ -61,4 +61,4 @@ if (!file.exists("./BankMarketing/gbmModel.RData")) {
   load("./BankMarketing/gbmModel.RData")
 }
 
-gbModel
+gbmModel
