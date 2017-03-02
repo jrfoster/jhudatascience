@@ -16,7 +16,7 @@ suppressMessages(library(dplyr))
 # Download the data if we don't already have it
 if (!file.exists("2007_EPA_Toxics_Release_Inventory.csv")) {
   download.file(url="https://opendata.socrata.com/api/views/nu94-6cmw/rows.csv?accessType=DOWNLOAD",
-              destFile="2007_EPA_Toxics_Release_Inventory.csv")
+              destfile="2007_EPA_Toxics_Release_Inventory.csv")
 }
 
 # Read the saved dataframe, otherwise, load the csv and save it as a dataframe
