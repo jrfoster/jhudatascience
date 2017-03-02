@@ -24,6 +24,19 @@ assertPackage <- function(pkg) {
     }
   }
 }
+
+if (!file.exists("./PrecisionCoaching/pmlTraining.rds")) {
+  if (!file.exists("pml-training.csv")) {
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                  destfile = "pml-training.csv")
+  }
+
+  pmlRaw <- read.csv("pml-training.csv", strip.white = TRUE, na.strings = c("#DIV/0!","NA",""))
+
+  # Save an RDS so subsequent knitr executions will be faster
+  saveRDS(pmlRaw, file = "./PrecisionCoaching/pmlTraining.rds")
+  rm(pmlRaw)
+}
 ```
 
 Background & Motivation
@@ -52,7 +65,7 @@ class: small-code
 
 ```{r scattercode, eval=FALSE}
 pmlRaw <- readRDS(
-  "PrecisionCoaching/pmlTraining.rds")
+  "./PrecisionCoaching/pmlTraining.rds")
 
 assertPackage("dplyr")
 pd <- pmlRaw %>%

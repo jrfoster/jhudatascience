@@ -44,7 +44,7 @@ class: small-code
 
 ```r
 pmlRaw <- readRDS(
-  "PrecisionCoaching/pmlTraining.rds")
+  "./PrecisionCoaching/pmlTraining.rds")
 
 assertPackage("dplyr")
 pd <- pmlRaw %>%
