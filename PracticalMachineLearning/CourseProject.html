@@ -173,10 +173,46 @@ corrplot(corrMtx, order=&quot;FPC&quot;, method=&quot;color&quot;, type=&quot;lo
 <div id="model-generation" class="section level2">
 <h2>Model Generation</h2>
 <p>Three models are fitted to the training data: Gradient Boosting Machine (GBM), K-Nearest Neighbor (KNN) and Random Forest as indicated by the original work, <span class="citation">(Velloso, Bulling, and Fulks 2013)</span> For each of the models we pass a call to trainControl using the default 10-fold cross validation and a parameter to include Principal Component Analysis (PCA) in pre-processing. See the appendix for the code used to generate (and persist) the models.</p>
-<pre class="r"><code>gbmModel &lt;- createGBMModel()
-knnModel &lt;- createKNNModel()
-rfModel &lt;- createRFModel()
-gbmVarImp &lt;- suppressMessages(varImp(gbmModel))
+<pre class="r"><code>gbmModel &lt;- createGBMModel()</code></pre>
+<pre><code>## Loading required package: gbm</code></pre>
+<pre><code>## Loading required package: survival</code></pre>
+<pre><code>## 
+## Attaching package: 'survival'</code></pre>
+<pre><code>## The following object is masked from 'package:caret':
+## 
+##     cluster</code></pre>
+<pre><code>## Loading required package: splines</code></pre>
+<pre><code>## Loading required package: parallel</code></pre>
+<pre><code>## Loaded gbm 2.1.1</code></pre>
+<pre><code>## Loading required package: plyr</code></pre>
+<pre><code>## -------------------------------------------------------------------------</code></pre>
+<pre><code>## You have loaded plyr after dplyr - this is likely to cause problems.
+## If you need functions from both plyr and dplyr, please load plyr first, then dplyr:
+## library(plyr); library(dplyr)</code></pre>
+<pre><code>## -------------------------------------------------------------------------</code></pre>
+<pre><code>## 
+## Attaching package: 'plyr'</code></pre>
+<pre><code>## The following objects are masked from 'package:dplyr':
+## 
+##     arrange, count, desc, failwith, id, mutate, rename, summarise,
+##     summarize</code></pre>
+<pre class="r"><code>knnModel &lt;- createKNNModel()
+rfModel &lt;- createRFModel()</code></pre>
+<pre><code>## Loading required package: randomForest</code></pre>
+<pre><code>## randomForest 4.6-12</code></pre>
+<pre><code>## Type rfNews() to see new features/changes/bug fixes.</code></pre>
+<pre><code>## 
+## Attaching package: 'randomForest'</code></pre>
+<pre><code>## The following object is masked from 'package:dplyr':
+## 
+##     combine</code></pre>
+<pre><code>## The following object is masked from 'package:ggplot2':
+## 
+##     margin</code></pre>
+<pre><code>## The following object is masked from 'package:gridExtra':
+## 
+##     combine</code></pre>
+<pre class="r"><code>gbmVarImp &lt;- suppressMessages(varImp(gbmModel))
 knnVarImp &lt;- suppressMessages(varImp(knnModel))
 rfVarImp &lt;- suppressMessages(varImp(rfModel))</code></pre>
 <p>Now that we’ve generated the models, lets examine each to see which variables are the most important in terms of predictive power, so that we can compare with the fast, correlation-based filter by <span class="citation">(Hall 2012)</span>.</p>
@@ -228,9 +264,9 @@ kable(table, digits=5, col.names=c(&quot;Model&quot;,&quot;Validation Accuracy&q
 </tr>
 <tr class="even">
 <td align="left">K-Nearest Neighbor</td>
-<td align="right">0.90008</td>
-<td align="right">0.09992</td>
-<td align="right">0.87356</td>
+<td align="right">0.90127</td>
+<td align="right">0.09873</td>
+<td align="right">0.87509</td>
 <td align="right">0.90267</td>
 </tr>
 <tr class="odd">
@@ -433,33 +469,33 @@ createGBMModel &lt;- function() {
 ## 
 ##           Reference
 ## Prediction    A    B    C    D    E
-##          A 1612   12   14   28    8
-##          B   66  946   57   39   31
-##          C   10   45  928   29   14
-##          D   12    6   72  866    8
-##          E   19   50   33   35  945
+##          A 1608   13   15   29    9
+##          B   62  950   57   40   30
+##          C   11   42  931   28   14
+##          D   10    4   71  874    5
+##          E   21   53   34   33  941
 ## 
 ## Overall Statistics
 ##                                           
-##                Accuracy : 0.9001          
-##                  95% CI : (0.8921, 0.9076)
-##     No Information Rate : 0.2921          
+##                Accuracy : 0.9013          
+##                  95% CI : (0.8934, 0.9088)
+##     No Information Rate : 0.2909          
 ##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
 ##                                           
-##                   Kappa : 0.8736          
+##                   Kappa : 0.8751          
 ##  Mcnemar's Test P-Value : &lt; 2.2e-16       
 ## 
 ## Statistics by Class:
 ## 
 ##                      Class: A Class: B Class: C Class: D Class: E
-## Sensitivity            0.9378   0.8933   0.8406   0.8686   0.9394
-## Specificity            0.9851   0.9600   0.9795   0.9800   0.9719
-## Pos Pred Value         0.9630   0.8306   0.9045   0.8983   0.8734
-## Neg Pred Value         0.9746   0.9762   0.9638   0.9734   0.9873
-## Prevalence             0.2921   0.1799   0.1876   0.1694   0.1709
-## Detection Rate         0.2739   0.1607   0.1577   0.1472   0.1606
+## Sensitivity            0.9393   0.8945   0.8403   0.8705   0.9419
+## Specificity            0.9842   0.9608   0.9801   0.9816   0.9711
+## Pos Pred Value         0.9606   0.8341   0.9074   0.9066   0.8697
+## Neg Pred Value         0.9753   0.9764   0.9636   0.9736   0.9879
+## Prevalence             0.2909   0.1805   0.1883   0.1706   0.1698
+## Detection Rate         0.2732   0.1614   0.1582   0.1485   0.1599
 ## Detection Prevalence   0.2845   0.1935   0.1743   0.1638   0.1839
-## Balanced Accuracy      0.9614   0.9267   0.9100   0.9243   0.9556</code></pre>
+## Balanced Accuracy      0.9617   0.9277   0.9102   0.9260   0.9565</code></pre>
 <pre class="r"><code>rfConfusion</code></pre>
 <pre><code>## Confusion Matrix and Statistics
 ## 
