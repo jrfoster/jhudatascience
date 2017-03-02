@@ -1,6 +1,6 @@
 # 
-# This file contains the shiny server implementation for the exploration of the
-# UCI Machine Learning Bank Marketing dataset.
+# This file contains the shiny server implementation for the Bank Marketing Campaign 
+# Success Predictor which utilizes the UCI Machine Learning Bank Marketing dataset.
 # 
 # It takes the selections from the user interface and generates a prediction based
 # on a gradient boosting model on the liklihood of success of a marketing campaign.
